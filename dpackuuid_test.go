@@ -3,6 +3,7 @@ package dpackuuid
 import (
 	"errors"
 	"math"
+	"math/rand"
 	"reflect"
 	"testing"
 
@@ -93,6 +94,30 @@ func TestPackUnpackModes(t *testing.T) {
 				t.Fatalf("UnpackMode() = %#v, want %#v", got, tt.output)
 			}
 		})
+	}
+}
+
+func TestPackUnpackVariant1WithBigValues(t *testing.T) {
+	const start = int64(12_345_678_901)
+	input := make([]int64, 15)
+	want := make([]int64, 15)
+	previousNum := start
+	for i := range input {
+		input[i] = previousNum + rand.Int63n(10)
+		want[i] = input[i]
+		previousNum = input[i]
+	}
+
+	id, err := Pack(input)
+	if err != nil {
+		t.Fatalf("Pack() error = %v", err)
+	}
+	got, err := Unpack(id)
+	if err != nil {
+		t.Fatalf("Unpack() error = %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Unpack() = %#v, want %#v", got, want)
 	}
 }
 
