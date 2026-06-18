@@ -96,6 +96,50 @@ func TestPackUnpackModes(t *testing.T) {
 	}
 }
 
+func TestPackUnpackVariant2WithHundredValues(t *testing.T) {
+	const start = int64(12_345_678_901)
+	input := make([]int64, 100)
+	want := make([]int64, 100)
+	for i := range input {
+		input[i] = start + int64(len(input)-1-i)
+		want[i] = start + int64(i)
+	}
+
+	id, err := Pack(input)
+	if err != nil {
+		t.Fatalf("Pack() error = %v", err)
+	}
+	got, err := Unpack(id)
+	if err != nil {
+		t.Fatalf("Unpack() error = %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Unpack() = %#v, want %#v", got, want)
+	}
+}
+
+func TestPackUnpackVariant3WithHundredValues(t *testing.T) {
+	const value = int64(12_345_678_901)
+	input := make([]int64, 100)
+	want := make([]int64, 100)
+	for i := range input {
+		input[i] = value
+		want[i] = value
+	}
+
+	id, err := Pack(input)
+	if err != nil {
+		t.Fatalf("Pack() error = %v", err)
+	}
+	got, err := Unpack(id)
+	if err != nil {
+		t.Fatalf("Unpack() error = %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Unpack() = %#v, want %#v", got, want)
+	}
+}
+
 func TestPackValidation(t *testing.T) {
 	tests := []struct {
 		name  string
