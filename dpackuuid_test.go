@@ -98,7 +98,7 @@ func TestPackUnpackModes(t *testing.T) {
 }
 
 func TestPackUnpackVariant1WithBigValues(t *testing.T) {
-	const start = int64(12_345_678_901)
+	const start = int64(123_456_789_012)
 	input := make([]int64, 15)
 	want := make([]int64, 15)
 	previousNum := start
