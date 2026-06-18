@@ -97,6 +97,30 @@ func TestPackUnpackModes(t *testing.T) {
 	}
 }
 
+func TestPackUnpackVariant1WithZeroOne(t *testing.T) {
+	const start = int64(123_456_789_012)
+	input := make([]int64, 15)
+	want := make([]int64, 15)
+	previousNum := start
+	for i := range input {
+		input[i] = previousNum + int64(i%2)
+		want[i] = input[i]
+		previousNum = input[i]
+	}
+
+	id, err := Pack(input)
+	if err != nil {
+		t.Fatalf("Pack() error = %v", err)
+	}
+	got, err := Unpack(id)
+	if err != nil {
+		t.Fatalf("Unpack() error = %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Unpack() = %#v, want %#v", got, want)
+	}
+}
+
 func TestPackUnpackVariant1WithBigValues(t *testing.T) {
 	const start = int64(123_456_789_012)
 	input := make([]int64, 15)
