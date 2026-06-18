@@ -1,5 +1,7 @@
 # Delta-Pack UUID (DPUID) — Specification
 
+Russian version: [SPEC.ru.md](SPEC.ru.md)
+
 **Version:** 0.3.0  
 **Status:** Draft  
 **Output target:** 128-bit UUID-compatible value

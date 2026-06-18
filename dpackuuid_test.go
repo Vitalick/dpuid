@@ -1,4 +1,4 @@
-package dpackuuid
+package dpuid
 
 import (
 	"errors"

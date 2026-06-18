@@ -7,10 +7,10 @@
 [![gofmt](https://img.shields.io/badge/gofmt-yes-00ADD8)](https://pkg.go.dev/cmd/gofmt)
 [![License](https://img.shields.io/github/license/Vitalick/dpackuuid)](LICENSE)
 
-Delta-Pack UUID упаковывает sign-homogeneous целочисленную последовательность в одно
-UUID-sized значение по формату из [SPEC.md](SPEC.md). Формат лучше всего подходит
-для последовательностей, где соседние абсолютные значения отличаются небольшими
-дельтами.
+Delta-Pack UUID упаковывает sign-homogeneous целочисленную последовательность в
+одно UUID-sized значение по формату из [SPEC.ru.md](SPEC.ru.md)
+([English SPEC](SPEC.md)). Формат лучше всего подходит для последовательностей,
+где соседние абсолютные значения отличаются небольшими дельтами.
 
 English README: [README.md](README.md).
 

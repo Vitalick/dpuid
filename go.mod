@@ -1,4 +1,4 @@
-module github.com/Vitalick/dpackuuid
+module github.com/Vitalick/dpuid
 
 go 1.20
 

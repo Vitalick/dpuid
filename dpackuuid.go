@@ -1,6 +1,6 @@
-// Package dpackuuid packs same-sign integer sequences into UUID-compatible
+// Package dpuid packs same-sign integer sequences into UUID-compatible
 // Delta-Pack UUID values and unpacks them back to absolute-value sorted slices.
-package dpackuuid
+package dpuid
 
 import (
 	"errors"
@@ -39,15 +39,15 @@ const (
 )
 
 var (
-	ErrEmptyInput      = errors.New("dpackuuid: empty input")
-	ErrMixedSigns      = errors.New("dpackuuid: mixed signs")
-	ErrDeltaOverflow   = errors.New("dpackuuid: max delta too large")
-	ErrCountOverflow   = errors.New("dpackuuid: too many numbers")
-	ErrTotalOverflow   = errors.New("dpackuuid: encoded payload exceeds output size")
-	ErrInvalidMode     = errors.New("dpackuuid: invalid mode")
-	ErrInvalidUUIDv8   = errors.New("dpackuuid: invalid UUIDv8 markers")
-	ErrPayloadOverflow = errors.New("dpackuuid: payload exceeds input size")
-	ErrValueOverflow   = errors.New("dpackuuid: value overflows target integer type")
+	ErrEmptyInput      = errors.New("dpuid: empty input")
+	ErrMixedSigns      = errors.New("dpuid: mixed signs")
+	ErrDeltaOverflow   = errors.New("dpuid: max delta too large")
+	ErrCountOverflow   = errors.New("dpuid: too many numbers")
+	ErrTotalOverflow   = errors.New("dpuid: encoded payload exceeds output size")
+	ErrInvalidMode     = errors.New("dpuid: invalid mode")
+	ErrInvalidUUIDv8   = errors.New("dpuid: invalid UUIDv8 markers")
+	ErrPayloadOverflow = errors.New("dpuid: payload exceeds input size")
+	ErrValueOverflow   = errors.New("dpuid: value overflows target integer type")
 )
 
 // Integer is any built-in signed or unsigned integer type up to 64 bits.
