@@ -203,6 +203,72 @@ func TestRawValueIsNotRequiredToBeUUIDv8(t *testing.T) {
 	}
 }
 
+func TestPackUnpackGenericSignedIntegers(t *testing.T) {
+	t.Run("int", func(t *testing.T) {
+		assertGenericRoundTrip(t, []int{-4, -2, -3}, []int{-2, -3, -4})
+	})
+	t.Run("int8", func(t *testing.T) {
+		assertGenericRoundTrip(t, []int8{-4, -2, -3}, []int8{-2, -3, -4})
+	})
+	t.Run("int16", func(t *testing.T) {
+		assertGenericRoundTrip(t, []int16{-4, -2, -3}, []int16{-2, -3, -4})
+	})
+	t.Run("int32", func(t *testing.T) {
+		assertGenericRoundTrip(t, []int32{-4, -2, -3}, []int32{-2, -3, -4})
+	})
+	t.Run("int64", func(t *testing.T) {
+		assertGenericRoundTrip(t, []int64{-4, -2, -3}, []int64{-2, -3, -4})
+	})
+}
+
+func TestPackUnpackGenericUnsignedIntegers(t *testing.T) {
+	t.Run("uint", func(t *testing.T) {
+		assertGenericRoundTrip(t, []uint{4, 2, 3}, []uint{2, 3, 4})
+	})
+	t.Run("uint8", func(t *testing.T) {
+		assertGenericRoundTrip(t, []uint8{4, 2, 3}, []uint8{2, 3, 4})
+	})
+	t.Run("uint16", func(t *testing.T) {
+		assertGenericRoundTrip(t, []uint16{4, 2, 3}, []uint16{2, 3, 4})
+	})
+	t.Run("uint32", func(t *testing.T) {
+		assertGenericRoundTrip(t, []uint32{4, 2, 3}, []uint32{2, 3, 4})
+	})
+	t.Run("uint64", func(t *testing.T) {
+		assertGenericRoundTrip(t, []uint64{1<<63 + 6, 1<<63 + 2, 1<<63 + 4}, []uint64{1<<63 + 2, 1<<63 + 4, 1<<63 + 6})
+	})
+}
+
+func TestGenericUnpackRangeValidation(t *testing.T) {
+	id, err := PackValues([]uint16{255, 256})
+	if err != nil {
+		t.Fatalf("PackValues() error = %v", err)
+	}
+
+	_, err = UnpackValues[uint8](id)
+	if !errors.Is(err, ErrValueOverflow) {
+		t.Fatalf("UnpackValues[uint8]() error = %v, want %v", err, ErrValueOverflow)
+	}
+
+	id, err = PackValues([]int16{-129, -128})
+	if err != nil {
+		t.Fatalf("PackValues() error = %v", err)
+	}
+	_, err = UnpackValues[int8](id)
+	if !errors.Is(err, ErrValueOverflow) {
+		t.Fatalf("UnpackValues[int8]() error = %v, want %v", err, ErrValueOverflow)
+	}
+
+	id, err = PackValues([]int16{-1, -2})
+	if err != nil {
+		t.Fatalf("PackValues() error = %v", err)
+	}
+	_, err = UnpackValues[uint16](id)
+	if !errors.Is(err, ErrValueOverflow) {
+		t.Fatalf("UnpackValues[uint16]() error = %v, want %v", err, ErrValueOverflow)
+	}
+}
+
 func BenchmarkPackVariant1(b *testing.B) {
 	values := []int64{1_000_040, 1_000_010, 1_000_030, 1_000_000, 1_000_020}
 	for i := 0; i < b.N; i++ {
@@ -263,4 +329,20 @@ func nonSequential(n int) []int64 {
 		out[i] = int64(i * 2)
 	}
 	return out
+}
+
+func assertGenericRoundTrip[T Integer](t *testing.T, input, want []T) {
+	t.Helper()
+
+	id, err := PackValues(input)
+	if err != nil {
+		t.Fatalf("PackValues() error = %v", err)
+	}
+	got, err := UnpackValues[T](id)
+	if err != nil {
+		t.Fatalf("UnpackValues() error = %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("UnpackValues() = %#v, want %#v", got, want)
+	}
 }

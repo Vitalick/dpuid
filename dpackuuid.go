@@ -1,4 +1,4 @@
-// Package dpackuuid packs same-sign int64 sequences into UUID-compatible
+// Package dpackuuid packs same-sign integer sequences into UUID-compatible
 // Delta-Pack UUID values and unpacks them back to absolute-value sorted slices.
 package dpackuuid
 
@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"math/bits"
+	"reflect"
 	"sort"
 
 	"github.com/google/uuid"
@@ -46,12 +47,18 @@ var (
 	ErrInvalidMode     = errors.New("dpackuuid: invalid mode")
 	ErrInvalidUUIDv8   = errors.New("dpackuuid: invalid UUIDv8 markers")
 	ErrPayloadOverflow = errors.New("dpackuuid: payload exceeds input size")
-	ErrValueOverflow   = errors.New("dpackuuid: decoded value overflows int64")
+	ErrValueOverflow   = errors.New("dpackuuid: value overflows target integer type")
 )
+
+// Integer is any built-in signed or unsigned integer type up to 64 bits.
+type Integer interface {
+	~int | ~int8 | ~int16 | ~int32 | ~int64 |
+		~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64
+}
 
 // Pack encodes values in UUIDv8 mode.
 func Pack(values []int64) (uuid.UUID, error) {
-	return PackMode(values, ModeUUIDv8)
+	return PackValues(values)
 }
 
 // PackMode encodes values according to SPEC.md.
@@ -60,6 +67,16 @@ func Pack(values []int64) (uuid.UUID, error) {
 // absolute value. Values must be sign-homogeneous: all non-negative or all
 // non-positive.
 func PackMode(values []int64, mode Mode) (uuid.UUID, error) {
+	return PackValuesMode(values, mode)
+}
+
+// PackValues encodes signed or unsigned integer values in UUIDv8 mode.
+func PackValues[T Integer](values []T) (uuid.UUID, error) {
+	return PackValuesMode(values, ModeUUIDv8)
+}
+
+// PackValuesMode encodes signed or unsigned integer values according to SPEC.md.
+func PackValuesMode[T Integer](values []T, mode Mode) (uuid.UUID, error) {
 	dataBits, err := modeDataBits(mode)
 	if err != nil {
 		return uuid.Nil, err
@@ -68,16 +85,20 @@ func PackMode(values []int64, mode Mode) (uuid.UUID, error) {
 		return uuid.Nil, ErrEmptyInput
 	}
 
+	signed, _, err := integerInfo[T]()
+	if err != nil {
+		return uuid.Nil, err
+	}
 	hasPositive, hasNegative := false, false
 	items := make([]packedValue, len(values))
 	for i, v := range values {
-		if v > 0 {
-			hasPositive = true
+		item, err := newPackedValue(v, signed)
+		if err != nil {
+			return uuid.Nil, err
 		}
-		if v < 0 {
-			hasNegative = true
-		}
-		items[i] = packedValue{value: v, abs: absInt64(v)}
+		hasPositive = hasPositive || item.positive
+		hasNegative = hasNegative || item.negative
+		items[i] = item
 	}
 	if hasPositive && hasNegative {
 		return uuid.Nil, ErrMixedSigns
@@ -85,7 +106,7 @@ func PackMode(values []int64, mode Mode) (uuid.UUID, error) {
 
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].abs == items[j].abs {
-			return items[i].value < items[j].value
+			return items[i].negative && !items[j].negative
 		}
 		return items[i].abs < items[j].abs
 	})
@@ -169,6 +190,33 @@ func Unpack(id uuid.UUID) ([]int64, error) {
 
 // UnpackMode decodes a DPUID value encoded in the selected mode.
 func UnpackMode(id uuid.UUID, mode Mode) ([]int64, error) {
+	return UnpackValuesMode[int64](id, mode)
+}
+
+// UnpackValues decodes a UUIDv8 DPUID value into the requested integer type.
+func UnpackValues[T Integer](id uuid.UUID) ([]T, error) {
+	return UnpackValuesMode[T](id, ModeUUIDv8)
+}
+
+// UnpackValuesMode decodes a DPUID value encoded in the selected mode into the
+// requested integer type.
+func UnpackValuesMode[T Integer](id uuid.UUID, mode Mode) ([]T, error) {
+	decoded, err := unpackNumbers(id, mode)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]T, len(decoded))
+	for i, value := range decoded {
+		out[i], err = castDecodedValue[T](value)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func unpackNumbers(id uuid.UUID, mode Mode) ([]decodedValue, error) {
 	dataBits, err := modeDataBits(mode)
 	if err != nil {
 		return nil, err
@@ -236,31 +284,29 @@ func UnpackMode(id uuid.UUID, mode Mode) ([]int64, error) {
 		}
 	}
 
-	out := make([]int64, 0, len(deltas)+1)
+	out := make([]decodedValue, 0, len(deltas)+1)
 	cur := source
-	first, err := applySign(cur, isNegative)
-	if err != nil {
-		return nil, err
-	}
-	out = append(out, first)
+	out = append(out, decodedValue{abs: cur, negative: isNegative})
 	for _, delta := range deltas {
 		if cur > math.MaxUint64-delta {
 			return nil, ErrValueOverflow
 		}
 		cur += delta
-		next, err := applySign(cur, isNegative)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, next)
+		out = append(out, decodedValue{abs: cur, negative: isNegative})
 	}
 
 	return out, nil
 }
 
 type packedValue struct {
-	value int64
-	abs   uint64
+	abs      uint64
+	negative bool
+	positive bool
+}
+
+type decodedValue struct {
+	abs      uint64
+	negative bool
 }
 
 func modeDataBits(mode Mode) (int, error) {
@@ -274,10 +320,21 @@ func modeDataBits(mode Mode) (int, error) {
 	}
 }
 
-func absInt64(v int64) uint64 {
-	if v >= 0 {
-		return uint64(v)
+func newPackedValue[T Integer](v T, signed bool) (packedValue, error) {
+	rv := reflect.ValueOf(v)
+	if signed {
+		n := rv.Int()
+		if n < 0 {
+			return packedValue{abs: absInt64(n), negative: true}, nil
+		}
+		return packedValue{abs: uint64(n), positive: n > 0}, nil
 	}
+
+	n := rv.Uint()
+	return packedValue{abs: n, positive: n > 0}, nil
+}
+
+func absInt64(v int64) uint64 {
 	return uint64(-(v + 1)) + 1
 }
 
@@ -288,20 +345,57 @@ func bitWidth(v uint64) int {
 	return bits.Len64(v)
 }
 
-func applySign(v uint64, negative bool) (int64, error) {
-	if negative {
-		if v == uint64(1)<<63 {
-			return math.MinInt64, nil
-		}
-		if v > uint64(1)<<63 {
-			return 0, ErrValueOverflow
-		}
-		return -int64(v), nil
+func integerInfo[T Integer]() (signed bool, width int, err error) {
+	var zero T
+	t := reflect.TypeOf(zero)
+	switch t.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return true, t.Bits(), nil
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return false, t.Bits(), nil
+	default:
+		return false, 0, fmt.Errorf("%w: %s", ErrValueOverflow, t)
 	}
-	if v > math.MaxInt64 {
-		return 0, ErrValueOverflow
+}
+
+func castDecodedValue[T Integer](value decodedValue) (T, error) {
+	signed, width, err := integerInfo[T]()
+	if err != nil {
+		var zero T
+		return zero, err
 	}
-	return int64(v), nil
+
+	var zero T
+	rv := reflect.New(reflect.TypeOf(zero)).Elem()
+	if signed {
+		maxPositive := uint64(1)<<(width-1) - 1
+		maxNegativeAbs := uint64(1) << (width - 1)
+		if value.negative {
+			if value.abs > maxNegativeAbs {
+				return zero, fmt.Errorf("%w: -%d does not fit", ErrValueOverflow, value.abs)
+			}
+			if value.abs == maxNegativeAbs {
+				rv.SetInt(-1 << (width - 1))
+				return rv.Interface().(T), nil
+			}
+			rv.SetInt(-int64(value.abs))
+			return rv.Interface().(T), nil
+		}
+		if value.abs > maxPositive {
+			return zero, fmt.Errorf("%w: %d does not fit", ErrValueOverflow, value.abs)
+		}
+		rv.SetInt(int64(value.abs))
+		return rv.Interface().(T), nil
+	}
+
+	if value.negative && value.abs != 0 {
+		return zero, fmt.Errorf("%w: negative value does not fit unsigned type", ErrValueOverflow)
+	}
+	if width < 64 && value.abs > uint64(1)<<width-1 {
+		return zero, fmt.Errorf("%w: %d does not fit", ErrValueOverflow, value.abs)
+	}
+	rv.SetUint(value.abs)
+	return rv.Interface().(T), nil
 }
 
 type bitWriter struct {
