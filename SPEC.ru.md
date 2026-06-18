@@ -2,8 +2,8 @@
 
 English version: [SPEC.md](SPEC.md)
 
-**Версия:** 0.3.0  
-**Статус:** Draft  
+**Версия:** 1.0.0  
+**Статус:** Ready  
 **Целевой размер результата:** 128-bit UUID-compatible value
 
 ---

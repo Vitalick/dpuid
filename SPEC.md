@@ -2,8 +2,8 @@
 
 Russian version: [SPEC.ru.md](SPEC.ru.md)
 
-**Version:** 0.3.0  
-**Status:** Draft  
+**Version:** 1.0.0  
+**Status:** Ready  
 **Output target:** 128-bit UUID-compatible value
 
 ---
