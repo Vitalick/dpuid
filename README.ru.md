@@ -1,11 +1,11 @@
-# dpackuuid
+# Delta-Pack UUID (DPUID)
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/Vitalick/dpackuuid.svg)](https://pkg.go.dev/github.com/Vitalick/dpackuuid)
-[![Go Report Card](https://goreportcard.com/badge/github.com/Vitalick/dpackuuid)](https://goreportcard.com/report/github.com/Vitalick/dpackuuid)
-[![Tests](https://github.com/Vitalick/dpackuuid/actions/workflows/test.yml/badge.svg)](https://github.com/Vitalick/dpackuuid/actions/workflows/test.yml)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/Vitalick/dpackuuid)](go.mod)
+[![Go Reference](https://pkg.go.dev/badge/github.com/Vitalick/dpuid.svg)](https://pkg.go.dev/github.com/Vitalick/dpuid)
+[![Go Report Card](https://goreportcard.com/badge/github.com/Vitalick/dpuid)](https://goreportcard.com/report/github.com/Vitalick/dpuid)
+[![Tests](https://github.com/Vitalick/dpuid/actions/workflows/test.yml/badge.svg)](https://github.com/Vitalick/dpuid/actions/workflows/test.yml)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/Vitalick/dpuid)](go.mod)
 [![gofmt](https://img.shields.io/badge/gofmt-yes-00ADD8)](https://pkg.go.dev/cmd/gofmt)
-[![License](https://img.shields.io/github/license/Vitalick/dpackuuid)](LICENSE)
+[![License](https://img.shields.io/github/license/Vitalick/dpuid)](LICENSE)
 
 Delta-Pack UUID упаковывает sign-homogeneous целочисленную последовательность в
 одно UUID-sized значение по формату из [SPEC.ru.md](SPEC.ru.md)
@@ -26,7 +26,7 @@ English README: [README.md](README.md).
 ## Установка
 
 ```sh
-go get github.com/Vitalick/dpackuuid
+go get github.com/Vitalick/dpuid
 ```
 
 ## Использование
@@ -38,16 +38,16 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/Vitalick/dpackuuid"
+	"github.com/Vitalick/dpuid"
 )
 
 func main() {
-	id, err := dpackuuid.Pack([]int64{1_000_040, 1_000_010, 1_000_030, 1_000_000})
+	id, err := dpuid.Pack([]int64{1_000_040, 1_000_010, 1_000_030, 1_000_000})
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	values, err := dpackuuid.Unpack(id)
+	values, err := dpuid.Unpack(id)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -61,19 +61,19 @@ func main() {
 `UnpackMode`:
 
 ```go
-id, err := dpackuuid.PackMode(values, dpackuuid.ModeRaw)
-values, err = dpackuuid.UnpackMode(id, dpackuuid.ModeRaw)
+id, err := dpuid.PackMode(values, dpuid.ModeRaw)
+values, err = dpuid.UnpackMode(id, dpuid.ModeRaw)
 ```
 
 Для других целочисленных типов, включая unsigned, используйте generic API:
 
 ```go
-id, err := dpackuuid.PackValues([]uint64{1<<63 + 6, 1<<63 + 2, 1<<63 + 4})
+id, err := dpuid.PackValues([]uint64{1<<63 + 6, 1<<63 + 2, 1<<63 + 4})
 if err != nil {
 	log.Fatal(err)
 }
 
-values, err := dpackuuid.UnpackValues[uint64](id)
+values, err := dpuid.UnpackValues[uint64](id)
 if err != nil {
 	log.Fatal(err)
 }
