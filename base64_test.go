@@ -63,3 +63,40 @@ func TestByteAndBase64Validation(t *testing.T) {
 		t.Fatalf("UnpackBytes() length error = %v, want %v", err, ErrInvalidBitLimit)
 	}
 }
+
+func TestPackUnpackBase64Variant1WithBigValuesHighDelta(t *testing.T) {
+	input := []int64{
+		43270164902,
+		43270164917,
+		43270164924,
+		43270164937,
+		43270164950,
+		43270164964,
+		43270164979,
+		43270164988,
+		43270164999,
+	}
+	want := []int64{
+		43270164902,
+		43270164917,
+		43270164924,
+		43270164937,
+		43270164950,
+		43270164964,
+		43270164979,
+		43270164988,
+		43270164999,
+	}
+
+	id, err := PackBase64(input)
+	if err != nil {
+		t.Fatalf("Pack() error = %v", err)
+	}
+	got, err := UnpackBase64[int64](id)
+	if err != nil {
+		t.Fatalf("Unpack() error = %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Unpack() = %#v, want %#v", got, want)
+	}
+}
