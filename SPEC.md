@@ -2,7 +2,7 @@
 
 Russian version: [SPEC.ru.md](SPEC.ru.md)
 
-**Version:** 1.2.0  
+**Version:** 1.1.0  
 **Status:** Ready  
 **Output target:** 128-bit UUID-compatible value; or variable-length base64 string
 
@@ -265,6 +265,30 @@ base64_len  = ceil(total_bytes / 3) * 4      // with standard padding
 | 20 nums, Δ=1 (V2) | 40 | 1 | 20 | 19+40 = 59 | 8 | 12 |
 | 64 nums, Δ≤7 | 32 | 3 | 64 | 19+32+3×63 = 240 | 30 | 40 |
 | 1 num (V3) | 20 | 0 | 1 | 19+20 = 39 | 5 | 8 |
+
+---
+
+### 4.4 Byte payload API and fixed-size base64
+
+The implementation exposes the DPUID bit stream as a reusable byte payload:
+
+```go
+PackBytes[T](values, outputBits) -> []byte
+UnpackBytes[T](data, inputBits) -> []T
+```
+
+A zero bit size selects the variable-length layout from §4.3. A positive bit
+size selects a fixed payload: Variant 1 uses an explicit `OUTPUT_POW - 1` count,
+while Variants 2 and 3 use all bits remaining after `D` for count, as in UUID
+modes. Unwritten bits are zero and the returned slice has `ceil(bits / 8)` bytes.
+
+UUIDv8 and raw UUID reuse this codec with 122 and 128 data bits respectively.
+Base64 wrappers encode the resulting bytes using RFC 4648. The unsized base64
+API passes zero; the sized base64 API passes its requested bit limit.
+
+For a positive arbitrary bit limit, the field-width cap is based on the smallest
+power-of-two container that covers the limit. Thus both 122 and 128 data bits use
+cap 7.
 
 ---
 
@@ -857,7 +881,7 @@ where `OUTPUT_BITS = 128` for UUID modes and `OUTPUT_BITS = ∞` (no cap) for ba
 
 | Version | Date | Notes |
 |---|---|---|
-| 1.2.0 | 2026-06-19 | UUID modes now derive OUTPUT_POW from element type, capped at log₂(OUTPUT_BITS); unified derivation formula `min(log₂(ELEMENT_BITS×2), log₂(OUTPUT_BITS))` in §3.1; updated §4.1–4.2, §5, §8, §9, §10, §14, §15 |
+| 1.1.0 | 2026-06-19 | UUID modes now derive OUTPUT_POW from element type, capped at log₂(OUTPUT_BITS); unified derivation formula `min(log₂(ELEMENT_BITS×2), log₂(OUTPUT_BITS))` in §3.1; updated §4.1–4.2, §5, §8, §9, §10, §14, §15 |
 | 1.1.0 | 2026-06-19 | Added base64 mode (§4.3, §8.4, §13.2); OUTPUT_POW derived from element type in base64; V2/V3 explicit COUNT_FIELD in base64 |
 | 1.0.0 | 2026-06-18 | Public release |
 | 0.3.0 | 2026-06-18 | Added Variant 3 (D=0); Variant 2 discriminator changed to D=1 |

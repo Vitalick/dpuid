@@ -7,9 +7,9 @@
 [![gofmt](https://img.shields.io/badge/gofmt-yes-00ADD8)](https://pkg.go.dev/cmd/gofmt)
 [![License](https://img.shields.io/github/license/Vitalick/dpuid)](LICENSE)
 
-Delta-Pack UUID packs a same-sign integer sequence into one UUID-sized
-value using the format described in [SPEC.md](SPEC.md). It is optimized for
-sequences where neighboring absolute values have small deltas.
+Delta-Pack UUID packs a same-sign integer sequence into a DPUID byte payload,
+UUID, or base64 string using the format described in [SPEC.md](SPEC.md). It is
+optimized for sequences where neighboring absolute values have small deltas.
 
 Russian README: [README.ru.md](README.ru.md).
 
@@ -17,6 +17,7 @@ Russian README: [README.ru.md](README.ru.md).
 
 - RFC 9562 UUIDv8 mode by default, using `github.com/google/uuid.UUID`.
 - Raw 128-bit mode for closed systems that do not need RFC UUID markers.
+- Variable-length and fixed-size byte payloads with base64 adapters.
 - Generic input and output for `int`, `int8`..`int64`, `uint`, and `uint8`..`uint64`.
 - Three SPEC variants: general deltas, sequential unit-step values, and identical values.
 - No runtime dependencies except `github.com/google/uuid`.
@@ -79,15 +80,37 @@ if err != nil {
 fmt.Println(values) // [9223372036854775810 9223372036854775812 9223372036854775814]
 ```
 
+Use the byte codec directly when no text or UUID transport is needed. Zero bits
+selects the minimum byte-aligned payload; a positive value sets an exact bit
+limit:
+
+```go
+data, err := dpuid.PackBytes([]int16{20, 10, 13}, 0)
+values, err := dpuid.UnpackBytes[int16](data, 0)
+
+fixed, err := dpuid.PackBytes([]int16{20, 10, 13}, 64)
+values, err = dpuid.UnpackBytes[int16](fixed, 64)
+```
+
+Base64 uses the same byte codec:
+
+```go
+encoded, err := dpuid.PackBase64([]int8{10, 13, 11, 12}) // "Olg="
+values8, err := dpuid.UnpackBase64[int8](encoded)
+
+fixedEncoded, err := dpuid.PackBase64Bits([]uint32{100, 104, 108}, 96)
+values32, err := dpuid.UnpackBase64Bits[uint32](fixedEncoded, 96)
+```
+
 ## Important Behavior
 
 Input values must be sign-homogeneous: all values are non-negative or all values
 are non-positive. Zero can be encoded with either group. Mixed positive and
 negative values are rejected.
 
-Unsigned values are always treated as non-negative. When unpacking into a typed
-slice, every decoded value must fit into the requested type or `ErrValueOverflow`
-is returned.
+Unsigned values are always treated as non-negative. The generic type passed to
+an unpack function must match the type used for packing because the element
+width determines the encoded field widths.
 
 The input order is not preserved. Decoded values are sorted by absolute value,
 as required by the SPEC.
@@ -99,8 +122,8 @@ UUID. UUIDv8 mode is the recommended default for UUID-aware systems.
 
 The package exposes sentinel errors such as `ErrEmptyInput`, `ErrMixedSigns`,
 `ErrDeltaOverflow`, `ErrCountOverflow`, `ErrTotalOverflow`, `ErrInvalidMode`,
-`ErrInvalidUUIDv8`, and `ErrPayloadOverflow`. Returned errors can be checked with
-`errors.Is`.
+`ErrInvalidUUIDv8`, `ErrInvalidBase64`, `ErrInvalidBitLimit`, and
+`ErrPayloadOverflow`. Returned errors can be checked with `errors.Is`.
 
 ## Benchmarks
 

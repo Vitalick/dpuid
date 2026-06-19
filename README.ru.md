@@ -8,7 +8,7 @@
 [![License](https://img.shields.io/github/license/Vitalick/dpuid)](LICENSE)
 
 Delta-Pack UUID упаковывает sign-homogeneous целочисленную последовательность в
-одно UUID-sized значение по формату из [SPEC.ru.md](SPEC.ru.md)
+DPUID byte payload, UUID или строку base64 по формату из [SPEC.ru.md](SPEC.ru.md)
 ([English SPEC](SPEC.md)). Формат лучше всего подходит для последовательностей,
 где соседние абсолютные значения отличаются небольшими дельтами.
 
@@ -18,6 +18,7 @@ English README: [README.md](README.md).
 
 - RFC 9562 UUIDv8 mode по умолчанию, публичный тип `github.com/google/uuid.UUID`.
 - Raw 128-bit mode для закрытых систем, где не нужны RFC UUID markers.
+- Byte payload переменной или фиксированной длины и base64 adapters.
 - Generic input/output для `int`, `int8`..`int64`, `uint` и `uint8`..`uint64`.
 - Все три варианта из SPEC: общие дельты, последовательные значения с шагом 1 и одинаковые значения.
 - Без runtime-зависимостей, кроме `github.com/google/uuid`.
@@ -81,15 +82,37 @@ if err != nil {
 fmt.Println(values) // [9223372036854775810 9223372036854775812 9223372036854775814]
 ```
 
+Если UUID или текстовый transport не нужен, используйте byte codec напрямую.
+Нулевой размер выбирает минимальный byte-aligned payload, положительный задаёт
+точный bit limit:
+
+```go
+data, err := dpuid.PackBytes([]int16{20, 10, 13}, 0)
+values, err := dpuid.UnpackBytes[int16](data, 0)
+
+fixed, err := dpuid.PackBytes([]int16{20, 10, 13}, 64)
+values, err = dpuid.UnpackBytes[int16](fixed, 64)
+```
+
+Base64 использует тот же byte codec:
+
+```go
+encoded, err := dpuid.PackBase64([]int8{10, 13, 11, 12}) // "Olg="
+values8, err := dpuid.UnpackBase64[int8](encoded)
+
+fixedEncoded, err := dpuid.PackBase64Bits([]uint32{100, 104, 108}, 96)
+values32, err := dpuid.UnpackBase64Bits[uint32](fixedEncoded, 96)
+```
+
 ## Важное Поведение
 
 Входные значения должны быть sign-homogeneous: все значения неотрицательные или
 все значения неположительные. Ноль можно кодировать с любой группой. Смешанные
 положительные и отрицательные значения отклоняются.
 
-Unsigned значения всегда считаются неотрицательными. При распаковке в типизированный
-slice каждое значение должно помещаться в выбранный тип, иначе вернется
-`ErrValueOverflow`.
+Unsigned значения всегда считаются неотрицательными. Generic type функции
+распаковки должен совпадать с типом, использованным при упаковке: разрядность
+элемента определяет ширины полей encoded payload.
 
 Порядок входных значений не сохраняется. При распаковке значения возвращаются
 отсортированными по абсолютному значению, как требует SPEC.
@@ -102,8 +125,8 @@ UUIDv8 mode является рекомендуемым режимом по ум
 
 Пакет экспортирует sentinel errors: `ErrEmptyInput`, `ErrMixedSigns`,
 `ErrDeltaOverflow`, `ErrCountOverflow`, `ErrTotalOverflow`, `ErrInvalidMode`,
-`ErrInvalidUUIDv8` и `ErrPayloadOverflow`. Возвращаемые ошибки можно проверять
-через `errors.Is`.
+`ErrInvalidUUIDv8`, `ErrInvalidBase64`, `ErrInvalidBitLimit` и
+`ErrPayloadOverflow`. Возвращаемые ошибки можно проверять через `errors.Is`.
 
 ## Бенчмарки
 

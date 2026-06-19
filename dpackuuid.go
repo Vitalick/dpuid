@@ -1,8 +1,9 @@
-// Package dpuid packs same-sign integer sequences into UUID-compatible
-// Delta-Pack UUID values and unpacks them back to absolute-value sorted slices.
+// Package dpuid packs same-sign integer sequences into Delta-Pack UUID byte,
+// base64, or UUID values and unpacks them into absolute-value sorted slices.
 package dpuid
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"math"
@@ -14,15 +15,8 @@ import (
 )
 
 const (
-	outputPow  = 7
 	rawBits    = 128
 	uuidv8Bits = 122
-
-	sourceLenBits = outputPow - 1
-	deltaLenBits  = outputPow - 2
-	countBits     = outputPow - 1
-	maxDeltaBits  = (1 << deltaLenBits) - 1
-	maxV1Deltas   = (1 << countBits) - 1
 )
 
 // Mode selects how DPUID data is embedded into the returned UUID value.
@@ -46,6 +40,8 @@ var (
 	ErrTotalOverflow   = errors.New("dpuid: encoded payload exceeds output size")
 	ErrInvalidMode     = errors.New("dpuid: invalid mode")
 	ErrInvalidUUIDv8   = errors.New("dpuid: invalid UUIDv8 markers")
+	ErrInvalidBase64   = errors.New("dpuid: invalid base64")
+	ErrInvalidBitLimit = errors.New("dpuid: invalid bit limit")
 	ErrPayloadOverflow = errors.New("dpuid: payload exceeds input size")
 	ErrValueOverflow   = errors.New("dpuid: value overflows target integer type")
 )
@@ -81,27 +77,71 @@ func PackValuesMode[T Integer](values []T, mode Mode) (uuid.UUID, error) {
 	if err != nil {
 		return uuid.Nil, err
 	}
-	if len(values) == 0 {
-		return uuid.Nil, ErrEmptyInput
-	}
-
-	signed, _, err := integerInfo[T]()
+	data, err := PackBytes(values, dataBits)
 	if err != nil {
 		return uuid.Nil, err
 	}
+	var packed [16]byte
+	copy(packed[:], data)
+	if mode == ModeUUIDv8 {
+		return insertUUIDv8(packed), nil
+	}
+	return uuid.UUID(packed), nil
+}
+
+// PackBase64 encodes values into a variable-length RFC 4648 base64 string.
+func PackBase64[T Integer](values []T) (string, error) {
+	return PackBase64Bits(values, 0)
+}
+
+// PackBase64Bits encodes values into base64 using the requested payload size.
+// A zero outputBits value selects the minimum byte-aligned payload size.
+func PackBase64Bits[T Integer](values []T, outputBits int) (string, error) {
+	data, err := PackBytes(values, outputBits)
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(data), nil
+}
+
+// PackBytes encodes values into an MSB-first DPUID payload. A zero outputBits
+// value selects a variable-length byte-aligned payload; a positive value sets
+// the exact usable bit limit.
+func PackBytes[T Integer](values []T, outputBits int) ([]byte, error) {
+	if outputBits < 0 {
+		return nil, ErrInvalidBitLimit
+	}
+	if len(values) == 0 {
+		return nil, ErrEmptyInput
+	}
+
+	signed, elementBits, err := integerInfo[T]()
+	if err != nil {
+		return nil, err
+	}
+	outputPow, err := codecOutputPow(elementBits, outputBits)
+	if err != nil {
+		return nil, err
+	}
+	sourceLenBits := outputPow - 1
+	deltaLenBits := outputPow - 2
+	countBits := outputPow - 1
+	maxDeltaBits := (1 << deltaLenBits) - 1
+	maxDeltas := (1 << countBits) - 1
+
 	hasPositive, hasNegative := false, false
 	items := make([]packedValue, len(values))
 	for i, v := range values {
 		item, err := newPackedValue(v, signed)
 		if err != nil {
-			return uuid.Nil, err
+			return nil, err
 		}
 		hasPositive = hasPositive || item.positive
 		hasNegative = hasNegative || item.negative
 		items[i] = item
 	}
 	if hasPositive && hasNegative {
-		return uuid.Nil, ErrMixedSigns
+		return nil, ErrMixedSigns
 	}
 
 	sort.Slice(items, func(i, j int) bool {
@@ -114,6 +154,9 @@ func PackValuesMode[T Integer](values []T, mode Mode) (uuid.UUID, error) {
 	source := items[0].abs
 	sourceWidth := bitWidth(source)
 	s := sourceWidth - 1
+	if sourceWidth > 1<<sourceLenBits {
+		return nil, fmt.Errorf("%w: source needs %d bits, max %d", ErrValueOverflow, sourceWidth, 1<<sourceLenBits)
+	}
 	isNegative := hasNegative
 
 	deltas := make([]uint64, 0, len(items)-1)
@@ -151,36 +194,46 @@ func PackValuesMode[T Integer](values []T, mode Mode) (uuid.UUID, error) {
 	}
 
 	if d > maxDeltaBits {
-		return uuid.Nil, fmt.Errorf("%w: need %d bits, max %d", ErrDeltaOverflow, d, maxDeltaBits)
+		return nil, fmt.Errorf("%w: need %d bits, max %d", ErrDeltaOverflow, d, maxDeltaBits)
 	}
-	if variant == 1 {
-		if len(deltas) > maxV1Deltas {
-			return uuid.Nil, fmt.Errorf("%w: have %d deltas, max %d", ErrCountOverflow, len(deltas), maxV1Deltas)
-		}
-		used := 19 + s + d*len(deltas)
-		if used > dataBits {
-			return uuid.Nil, fmt.Errorf("%w: need %d bits, have %d", ErrTotalOverflow, used, dataBits)
-		}
+	if (outputBits == 0 || variant == 1) && len(deltas) > maxDeltas {
+		return nil, fmt.Errorf("%w: have %d deltas, max %d", ErrCountOverflow, len(deltas), maxDeltas)
 	}
 
-	w := newBitWriter(dataBits)
+	headerBits := 3*outputPow - 2 + s
+	usedBits := headerBits
+	if variant == 1 {
+		usedBits += d * len(deltas)
+	} else if outputBits > 0 {
+		usedBits = 2*outputPow + s - 1
+	}
+	limit := outputBits
+	if limit == 0 {
+		limit = bytesForBits(usedBits) * 8
+	} else if usedBits > limit {
+		return nil, fmt.Errorf("%w: need %d bits, have %d", ErrTotalOverflow, usedBits, limit)
+	}
+
+	w := newBitWriter(limit)
 	w.writeBool(isNegative)
 	w.write(uint64(s), sourceLenBits)
 	w.write(source, sourceWidth)
 	w.write(uint64(d), deltaLenBits)
-	if variant == 1 {
+	if outputBits == 0 || variant == 1 {
 		w.write(uint64(len(deltas)), countBits)
+	} else {
+		remaining := limit - w.pos
+		if !fitsUnsigned(uint64(len(deltas)), remaining) {
+			return nil, fmt.Errorf("%w: have %d deltas, field width %d", ErrCountOverflow, len(deltas), remaining)
+		}
+		w.write(uint64(len(deltas)), remaining)
+	}
+	if variant == 1 {
 		for _, delta := range deltas {
 			w.write(delta, d)
 		}
-	} else {
-		w.write(uint64(len(deltas)), dataBits-w.pos)
 	}
-
-	if mode == ModeUUIDv8 {
-		return insertUUIDv8(w.bytes), nil
-	}
-	return uuid.UUID(w.bytes), nil
+	return w.bytes, nil
 }
 
 // Unpack decodes a UUIDv8 DPUID value.
@@ -201,7 +254,47 @@ func UnpackValues[T Integer](id uuid.UUID) ([]T, error) {
 // UnpackValuesMode decodes a DPUID value encoded in the selected mode into the
 // requested integer type.
 func UnpackValuesMode[T Integer](id uuid.UUID, mode Mode) ([]T, error) {
-	decoded, err := unpackNumbers(id, mode)
+	dataBits, err := modeDataBits(mode)
+	if err != nil {
+		return nil, err
+	}
+	data := [16]byte(id)
+	if mode == ModeUUIDv8 {
+		data, err = extractUUIDv8(id)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return UnpackBytes[T](data[:], dataBits)
+}
+
+// UnpackBase64 decodes a variable-length RFC 4648 base64 DPUID payload.
+func UnpackBase64[T Integer](value string) ([]T, error) {
+	return UnpackBase64Bits[T](value, 0)
+}
+
+// UnpackBase64Bits decodes a base64 DPUID payload with the requested bit size.
+// A zero inputBits value selects the variable-length byte-aligned layout.
+func UnpackBase64Bits[T Integer](value string, inputBits int) ([]T, error) {
+	data, err := base64.StdEncoding.Strict().DecodeString(value)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidBase64, err)
+	}
+	return UnpackBytes[T](data, inputBits)
+}
+
+// UnpackBytes decodes an MSB-first DPUID payload. A zero inputBits value selects
+// the variable-length byte-aligned layout; a positive value is the exact usable
+// bit limit and must match the supplied buffer size.
+func UnpackBytes[T Integer](data []byte, inputBits int) ([]T, error) {
+	if inputBits < 0 {
+		return nil, ErrInvalidBitLimit
+	}
+	_, elementBits, err := integerInfo[T]()
+	if err != nil {
+		return nil, err
+	}
+	decoded, err := unpackNumbers(data, inputBits, elementBits)
 	if err != nil {
 		return nil, err
 	}
@@ -216,21 +309,31 @@ func UnpackValuesMode[T Integer](id uuid.UUID, mode Mode) ([]T, error) {
 	return out, nil
 }
 
-func unpackNumbers(id uuid.UUID, mode Mode) ([]decodedValue, error) {
-	dataBits, err := modeDataBits(mode)
+func unpackNumbers(data []byte, inputBits, elementBits int) ([]decodedValue, error) {
+	if inputBits > 0 && len(data) != bytesForBits(inputBits) {
+		return nil, fmt.Errorf("%w: got %d bytes for %d bits", ErrInvalidBitLimit, len(data), inputBits)
+	}
+	if inputBits == 0 && len(data) == 0 {
+		return nil, ErrPayloadOverflow
+	}
+	limit := inputBits
+	if limit == 0 {
+		limit = len(data) * 8
+	}
+	if !zeroBits(data, limit, len(data)*8) {
+		return nil, fmt.Errorf("%w: non-zero bits outside bit limit", ErrPayloadOverflow)
+	}
+
+	outputPow, err := codecOutputPow(elementBits, inputBits)
 	if err != nil {
 		return nil, err
 	}
+	sourceLenBits := outputPow - 1
+	deltaLenBits := outputPow - 2
+	countBits := outputPow - 1
+	maxDeltaBits := (1 << deltaLenBits) - 1
 
-	data := [16]byte(id)
-	if mode == ModeUUIDv8 {
-		data, err = extractUUIDv8(id)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	r := newBitReader(data, dataBits)
+	r := newBitReader(data, limit)
 	isNegative, err := r.readBool()
 	if err != nil {
 		return nil, err
@@ -240,7 +343,11 @@ func unpackNumbers(id uuid.UUID, mode Mode) ([]decodedValue, error) {
 		return nil, err
 	}
 	sourceWidth := int(s) + 1
-	if sourceWidth > dataBits-13 {
+	minimumTail := deltaLenBits
+	if inputBits == 0 {
+		minimumTail += countBits
+	}
+	if sourceWidth > limit-r.pos-minimumTail {
 		return nil, fmt.Errorf("%w: source width %d", ErrPayloadOverflow, sourceWidth)
 	}
 	source, err := r.read(sourceWidth)
@@ -251,14 +358,18 @@ func unpackNumbers(id uuid.UUID, mode Mode) ([]decodedValue, error) {
 	if err != nil {
 		return nil, err
 	}
-	if d > maxDeltaBits {
+	if d > uint64(maxDeltaBits) {
 		return nil, fmt.Errorf("%w: D=%d", ErrPayloadOverflow, d)
 	}
 
 	var deltas []uint64
 	switch d {
 	case 0, 1:
-		count, err := r.readCount(dataBits - r.pos)
+		width := limit - r.pos
+		if inputBits == 0 {
+			width = countBits
+		}
+		count, err := r.readCount(width)
 		if err != nil {
 			return nil, err
 		}
@@ -271,9 +382,9 @@ func unpackNumbers(id uuid.UUID, mode Mode) ([]decodedValue, error) {
 		if err != nil {
 			return nil, err
 		}
-		used := 19 + int(s) + int(d)*int(count)
-		if used > dataBits {
-			return nil, fmt.Errorf("%w: need %d bits, have %d", ErrPayloadOverflow, used, dataBits)
+		used := 3*outputPow - 2 + int(s) + int(d)*int(count)
+		if used > limit {
+			return nil, fmt.Errorf("%w: need %d bits, have %d", ErrPayloadOverflow, used, limit)
 		}
 		deltas = make([]uint64, int(count))
 		for i := range deltas {
@@ -282,6 +393,14 @@ func unpackNumbers(id uuid.UUID, mode Mode) ([]decodedValue, error) {
 				return nil, err
 			}
 		}
+	}
+	if inputBits == 0 {
+		padding := limit - r.pos
+		if padding >= 8 || !zeroBits(data, r.pos, limit) {
+			return nil, fmt.Errorf("%w: invalid byte padding", ErrPayloadOverflow)
+		}
+	} else if d >= 2 && !zeroBits(data, r.pos, limit) {
+		return nil, fmt.Errorf("%w: non-zero payload padding", ErrPayloadOverflow)
 	}
 
 	out := make([]decodedValue, 0, len(deltas)+1)
@@ -318,6 +437,37 @@ func modeDataBits(mode Mode) (int, error) {
 	default:
 		return 0, ErrInvalidMode
 	}
+}
+
+func codecOutputPow(elementBits, bitLimit int) (int, error) {
+	outputPow := bits.Len(uint(elementBits*2)) - 1
+	if bitLimit > 0 {
+		capPow := bits.Len(uint(bitLimit - 1))
+		if capPow < outputPow {
+			outputPow = capPow
+		}
+	}
+	if outputPow < 3 {
+		return 0, fmt.Errorf("%w: %d bits are too small", ErrInvalidBitLimit, bitLimit)
+	}
+	return outputPow, nil
+}
+
+func bytesForBits(bitCount int) int {
+	return (bitCount + 7) / 8
+}
+
+func fitsUnsigned(value uint64, width int) bool {
+	return width >= 64 || width >= 0 && value < uint64(1)<<width
+}
+
+func zeroBits(data []byte, from, to int) bool {
+	for pos := from; pos < to; pos++ {
+		if getBit(data, pos) {
+			return false
+		}
+	}
+	return true
 }
 
 func newPackedValue[T Integer](v T, signed bool) (packedValue, error) {
@@ -399,13 +549,13 @@ func castDecodedValue[T Integer](value decodedValue) (T, error) {
 }
 
 type bitWriter struct {
-	bytes [16]byte
+	bytes []byte
 	pos   int
 	limit int
 }
 
 func newBitWriter(limit int) *bitWriter {
-	return &bitWriter{limit: limit}
+	return &bitWriter{bytes: make([]byte, bytesForBits(limit)), limit: limit}
 }
 
 func (w *bitWriter) writeBool(v bool) {
@@ -418,7 +568,7 @@ func (w *bitWriter) writeBool(v bool) {
 
 func (w *bitWriter) write(v uint64, width int) {
 	for i := width - 1; i >= 0; i-- {
-		if ((v >> i) & 1) == 1 {
+		if i < 64 && ((v>>i)&1) == 1 {
 			setBit(&w.bytes, w.pos, true)
 		}
 		w.pos++
@@ -426,12 +576,12 @@ func (w *bitWriter) write(v uint64, width int) {
 }
 
 type bitReader struct {
-	bytes [16]byte
+	bytes []byte
 	pos   int
 	limit int
 }
 
-func newBitReader(bytes [16]byte, limit int) *bitReader {
+func newBitReader(bytes []byte, limit int) *bitReader {
 	return &bitReader{bytes: bytes, limit: limit}
 }
 
@@ -475,14 +625,16 @@ func (r *bitReader) readCount(width int) (uint64, error) {
 
 func insertUUIDv8(data [16]byte) uuid.UUID {
 	var out [16]byte
+	dataBytes := data[:]
+	outBytes := out[:]
 	for i := 0; i < 48; i++ {
-		setBit(&out, i, getBit(data, i))
+		setBit(&outBytes, i, getBit(dataBytes, i))
 	}
 	for i := 0; i < 12; i++ {
-		setBit(&out, 52+i, getBit(data, 48+i))
+		setBit(&outBytes, 52+i, getBit(dataBytes, 48+i))
 	}
 	for i := 0; i < 62; i++ {
-		setBit(&out, 66+i, getBit(data, 60+i))
+		setBit(&outBytes, 66+i, getBit(dataBytes, 60+i))
 	}
 
 	out[6] = (out[6] & 0x0f) | 0x80
@@ -497,27 +649,29 @@ func extractUUIDv8(id uuid.UUID) ([16]byte, error) {
 
 	src := [16]byte(id)
 	var data [16]byte
+	srcBytes := src[:]
+	dataBytes := data[:]
 	for i := 0; i < 48; i++ {
-		setBit(&data, i, getBit(src, i))
+		setBit(&dataBytes, i, getBit(srcBytes, i))
 	}
 	for i := 0; i < 12; i++ {
-		setBit(&data, 48+i, getBit(src, 52+i))
+		setBit(&dataBytes, 48+i, getBit(srcBytes, 52+i))
 	}
 	for i := 0; i < 62; i++ {
-		setBit(&data, 60+i, getBit(src, 66+i))
+		setBit(&dataBytes, 60+i, getBit(srcBytes, 66+i))
 	}
 	return data, nil
 }
 
-func getBit(bytes [16]byte, pos int) bool {
+func getBit(bytes []byte, pos int) bool {
 	return (bytes[pos/8] & (1 << (7 - pos%8))) != 0
 }
 
-func setBit(bytes *[16]byte, pos int, value bool) {
+func setBit(bytes *[]byte, pos int, value bool) {
 	mask := byte(1 << (7 - pos%8))
 	if value {
-		bytes[pos/8] |= mask
+		(*bytes)[pos/8] |= mask
 		return
 	}
-	bytes[pos/8] &^= mask
+	(*bytes)[pos/8] &^= mask
 }
