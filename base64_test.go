@@ -1,6 +1,7 @@
 package dpuid
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 )

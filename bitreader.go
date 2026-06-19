@@ -1,5 +1,10 @@
 package dpuid
 
+import (
+	"fmt"
+	"math"
+)
+
 type bitReader struct {
 	bytes []byte
 	pos   int
