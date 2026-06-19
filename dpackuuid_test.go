@@ -145,6 +145,43 @@ func TestPackUnpackVariant1WithBigValues(t *testing.T) {
 	}
 }
 
+func TestPackUnpackVariant1WithBigValuesHighDelta(t *testing.T) {
+	input := []int64{
+		43270164902,
+		43270164917,
+		43270164924,
+		43270164937,
+		43270164950,
+		43270164964,
+		43270164979,
+		43270164988,
+		43270164999,
+	}
+	want := []int64{
+		43270164902,
+		43270164917,
+		43270164924,
+		43270164937,
+		43270164950,
+		43270164964,
+		43270164979,
+		43270164988,
+		43270164999,
+	}
+
+	id, err := Pack(input)
+	if err != nil {
+		t.Fatalf("Pack() error = %v", err)
+	}
+	got, err := Unpack(id)
+	if err != nil {
+		t.Fatalf("Unpack() error = %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("Unpack() = %#v, want %#v", got, want)
+	}
+}
+
 func TestPackUnpackVariant2WithHundredValues(t *testing.T) {
 	const start = int64(12_345_678_901)
 	input := make([]int64, 100)
